@@ -7,7 +7,6 @@ object SparkConfiguration {
   def sparkSessionConf(): SparkSession = {
     val conf: SparkConf = new SparkConf()
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-
     SparkSession.builder().appName("Entity").config(conf).getOrCreate()
   }
 }

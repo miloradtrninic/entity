@@ -11,13 +11,12 @@ help()
    echo "b     Build app with SBT assembly. Values 0 and 1"
    echo "d     DRIVER memory in GB."
    echo "e     EXECUTOR memory in GB."
-   echo "a     ARGUMENTS "
    echo "p     Properties file. Optional"
    echo
    exit
 }
 
-if [ $# -lt 4 ]
+if [ $# -lt 3 ]
   then
     help	
 fi
@@ -32,7 +31,6 @@ do
             b)    BUILD=${VALUE} ;;
             e)    EXECUTOR=${VALUE} ;;
             d)    DRIVER=${VALUE} ;;
-            a)    ARG=${VALUE} ;;    
             p)    PROP=${VALUE} ;;             
             *)    echo "Unknown parameter"; help
     esac    
@@ -56,8 +54,7 @@ fi
 docker exec spark-master mkdir /deploy
 docker cp ./target/scala-2.11/entity-assembly-0.1.jar spark-master:/deploy/entity_resolution.jar
 docker exec spark-master /spark/bin/spark-submit \
-  --packages com.johnsnowlabs.nlp:spark-nlp_2.11:2.5.5 \
   --executor-memory ${EXECUTOR}g \
   --driver-memory ${DRIVER}g \
   --class "com.synechron.entity.entityresolution.ResolutionMain" \
-  /deploy/entity_resolution.jar ${ARG}
+  /deploy/entity_resolution.jar

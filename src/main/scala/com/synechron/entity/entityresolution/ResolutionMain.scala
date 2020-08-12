@@ -1,43 +1,65 @@
 package com.synechron.entity.entityresolution
-import com.johnsnowlabs.nlp.{DocumentAssembler, Finisher}
-import com.johnsnowlabs.nlp.annotator.{Normalizer, Tokenizer}
-import com.johnsnowlabs.nlp.pretrained.PretrainedPipeline
-import com.synechron.entity.conf.SparkConfiguration.sparkSessionConf
-import org.apache.spark.SparkConf
-import org.apache.spark.ml.Pipeline
-import org.apache.spark.sql.SparkSession
+import com.synechron.entity.conf.SparkConfiguration
+import org.apache.spark.ml.{Pipeline, PipelineModel}
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.ml.classification.NaiveBayes
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+import org.apache.spark.ml.feature.{HashingTF, IndexToString, StopWordsRemover, StringIndexer, StringIndexerModel, Tokenizer}
+import org.apache.spark.sql.functions.{col, concat, lit, when}
 
 object ResolutionMain {
-  val conf: SparkConf = new SparkConf()
-    .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-  val spark: SparkSession = SparkSession.builder().appName("Entity").config(conf).getOrCreate()
+  val spark: SparkSession = SparkConfiguration.sparkSessionConf()
   def main(args: Array[String]): Unit = {
 
-    val articlesDF = spark.createDataFrame(Seq(
-      ("Tensorflow Google", "Google has announced the release of a beta version of the popular TensorFlow machine learning library"),
-      ("Paris metro", "The Paris metro will soon enter the 21st century, ditching single-use paper tickets for rechargeable electronic cards.")
-    )).toDF("title", "body")
-    val pipeline= PretrainedPipeline("recognize_entities_dl", lang = "en", diskLocation = Option("hdfs://namenode:9000/models/recognize_entities_dl/"))
-    val bodyDF = articlesDF.select("body")
-    val result = pipeline.transform(bodyDF)
-    result.show()
-//    val document = new DocumentAssembler()
-//      .setInputCol("title")
-//      .setOutputCol("document")
-//
-//    val token = new Tokenizer()
-//      .setInputCols("document")
-//      .setOutputCol("token")
-//
-//    val normalizer = new Normalizer()
-//      .setInputCols("token")
-//      .setOutputCol("normal")
-//
-//    val finisher = new Finisher()
-//      .setInputCols("normal")
-//
-//    val pipeline = new Pipeline().setStages(Array(document, token, normalizer, finisher))
-//
-//    pipeline.fit(articlesDF).transform(articlesDF).show()
+    val trainData = readDataFromCSV("hdfs://namenode:9000/model/news/data/naive_bayes/news_crawler_df_train.csv")
+    val testData = readDataFromCSV("hdfs://namenode:9000/model/news/data/naive_bayes/news_crawler_df_test.csv")
+
+    val model = createModel(trainData)
+
+    val transformed = model.transform(testData)
+    transformed.show()
+
+    val evaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol("label")
+      .setPredictionCol("prediction")
+      .setMetricName("accuracy")
+    val accuracy = evaluator.evaluate(transformed)
+    println()
+    println(s"Test set accuracy = $accuracy")
+    println()
+  }
+  def readDataFromCSV(path: String): DataFrame = {
+    val SPACE = " "
+    val csvDF = spark.read.option("header", "true")
+      .option("delimiter", "\t")
+      .csv(path)
+    csvDF.withColumn("title_body", concat(col("title"), lit(SPACE), col("body")))
+      .drop("body", "title")
+  }
+  def createModel(trainData: DataFrame): PipelineModel = {
+    val nb = new NaiveBayes()
+      .setFeaturesCol("features")
+    val labelIndexer = new StringIndexer()
+      .setInputCol("currency")
+      .setOutputCol("label")
+      .fit(trainData)
+      .setHandleInvalid("keep")
+    val predictionToLabel = new IndexToString()
+      .setInputCol("prediction")
+      .setOutputCol("currency_prediction")
+      .setLabels(labelIndexer.labels)
+
+    val pipeline: Pipeline = new Pipeline()
+      .setStages(Array(labelIndexer, sentenceToWords, removeStopWords, defineFeatures, nb, predictionToLabel))
+    pipeline.fit(trainData)
+  }
+  def sentenceToWords: Tokenizer = {
+    new Tokenizer().setInputCol("title_body").setOutputCol("words")
+  }
+  def removeStopWords: StopWordsRemover = {
+    new StopWordsRemover().setInputCol("words").setOutputCol("removed_stop")
+  }
+  def defineFeatures: HashingTF = {
+    new HashingTF().setInputCol("removed_stop").setOutputCol("features")
   }
 }
